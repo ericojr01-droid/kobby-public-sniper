@@ -1,4 +1,7 @@
 pyTelegramBotAPI
-yfinance
 Flask
 requests
+beautifulsoup4
+pytz
+yfinance
+lxml
