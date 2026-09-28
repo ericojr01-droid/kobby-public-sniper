@@ -1,1 +1,6 @@
 flask
+requests
+pytz
+tradingview-ta
+pandas
+gunicorn
