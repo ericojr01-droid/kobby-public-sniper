@@ -9,7 +9,7 @@ CHANNEL_ID = "@KobbyforexTrade"
 
 # Import your existing logic from bots folder
 from bots.top_down import analyze_top_down
-from bots.entry_risk import check_entry
+from bots import entry_risk
 from bots.fundamental import check_fundamentals
 from bots.market_status import is_market_open
 
