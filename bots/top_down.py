@@ -1,4 +1,19 @@
-# bots/top_down.py
+import requests
+
+BOT_TOKEN = "8826207602:AAEnJMlJOb6lW1QHV4aJ9E8edPacTprTE_Q"
+CHAT_ID = "8240862120"
+CHANNEL_ID = "@KobbyforexTrade"
+
+def send_telegram(message):
+    try:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        data1 = {"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
+        requests.post(url, data=data1, timeout=10)
+        data2 = {"chat_id": CHANNEL_ID, "text": message, "parse_mode": "HTML"}
+        requests.post(url, data=data2, timeout=10)
+    except:
+        pass
+
 from tradingview_ta import TA_Handler, Interval
 import pandas as pd
 
