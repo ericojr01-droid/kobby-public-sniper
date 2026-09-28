@@ -64,19 +64,17 @@ def get_tv_analysis(pair, timeframe):
 
 def check_liquidity_sweep(data_1h, data_15m):
     """Check if liquidity sweep don happen"""
-    # If 15M low sweeps below 1H low then closes back up = Bullish sweep
-    # If 15M high sweeps above 1H high then closes back down = Bearish sweep
     try:
         if data_15m["low"] < data_1h["low"] and data_15m["close"] > data_1h["low"]:
-            return True, "Bullish Liquidity Sweep - Sell stops grabbed"
+            return True, f"Bullish Sweep - Sell stops grabbed below {data_1h['low']:.5f}"
         if data_15m["high"] > data_1h["high"] and data_15m["close"] < data_1h["high"]:
-            return True, "Bearish Liquidity Sweep - Buy stops grabbed"
+            return True, f"Bearish Sweep - Buy stops grabbed above {data_1h['high']:.5f}"
         return False, "No Sweep Yet"
     except:
         return False, "No Data"
 
 def check_fibonacci_zone(swing_high, swing_low, current_price, bias):
-    """Check if price dey inside 50%-79% Fib discount/premium"""
+    """Check if price dey inside 50%-79% Fib discount/premium - FOR STRENGTH CHECK ONLY"""
     try:
         fib_range = swing_high - swing_low
         fib_50 = swing_high - fib_range * 0.5 if bias == "BUY" else swing_low + fib_range * 0.5
@@ -91,12 +89,47 @@ def check_fibonacci_zone(swing_high, swing_low, current_price, bias):
     except:
         return False, "Fib Error"
 
+# === NEW FEATURES ADDED ===
+def check_order_block(data_1h, data_15m, bias):
+    """Check Order Block - POI must contain OB"""
+    try:
+        if bias == "BUY" and data_15m["close"] <= data_1h["low"] * 1.003:
+            return True, f"OB Demand at {data_1h['low']:.5f}"
+        if bias == "SELL" and data_15m["close"] >= data_1h["high"] * 0.997:
+            return True, f"OB Supply at {data_1h['high']:.5f}"
+        return False, "No OB"
+    except:
+        return False, "OB Error"
+
+def check_fvg(data_1h, data_15m, bias):
+    """Check Fair Value Gap after sweep"""
+    try:
+        range_1h = data_1h["high"] - data_1h["low"]
+        if bias == "BUY" and (data_1h["low"] - data_15m["low"]) > (range_1h * 0.1):
+            return True, "FVG Bullish formed"
+        if bias == "SELL" and (data_15m["high"] - data_1h["high"]) > (range_1h * 0.1):
+            return True, "FVG Bearish formed"
+        return False, "No FVG"
+    except:
+        return False, "FVG Error"
+
+def check_15m_confirmation(data_15m, bias):
+    """15M confirmation candle"""
+    try:
+        if bias == "BUY":
+            return data_15m["close"] > data_15m["open"], "15M Bullish Confirm"
+        else:
+            return data_15m["close"] < data_15m["open"], "15M Bearish Confirm"
+    except:
+        return False, "No 15M Data"
+
 def analyze_top_down(pair):
     """
     FULL BOT 1 - TradingView Technical Confluence
-    Top Down 1D-4H-1H-15M + SMC + Liquidity + Fib + Supply/Demand + POI
+    Top Down 1D-4H-1H-15M + SMC + Liquidity + Fib + Supply/Demand + POI + OB + FVG
+    NEW LOGIC: Sweep + POI + (OB or FVG) + 15M Confirm = STRONG | Fib = SNIPER rating
     """
-    # Step 1: Get all timeframes LIVE from TradingView
+    # Step 1: Get all timeframes LIVE from TradingView - 1D-4H-1H-15M
     d1 = get_tv_analysis(pair, "1D")
     h4 = get_tv_analysis(pair, "4H")
     h1 = get_tv_analysis(pair, "1H")
@@ -105,8 +138,7 @@ def analyze_top_down(pair):
     if not all([d1, h4, h1, m15]):
         return {"pair": pair, "setup": False, "reason": "TradingView data incomplete"}
 
-    # Step 2: Top Down Bias
-    # 1D trend
+    # Step 2: Top Down Bias - 1D
     if d1["close"] > d1["ema50"] and d1["summary"] in ["BUY", "STRONG_BUY"]:
         bias_1d = "BUY"
     elif d1["close"] < d1["ema50"] and d1["summary"] in ["SELL", "STRONG_SELL"]:
@@ -119,37 +151,59 @@ def analyze_top_down(pair):
     if h4_bias!= bias_1d:
         return {"pair": pair, "setup": False, "reason": f"4H {h4_bias} no align with 1D {bias_1d} - Wait for BOS alignment"}
 
-    # Step 3: Liquidity Sweep Check
+    # Step 3: Supply/Demand + POI (Point of Interest) - 1H
+    if bias_1d == "BUY":
+        demand_zone = h1["low"]
+        supply_zone = h1["high"]
+        poi = m15["close"] <= h1["low"] * 1.003
+        poi_msg = f"1H Demand POI {h1['low']:.5f}"
+    else:
+        demand_zone = h1["low"]
+        supply_zone = h1["high"]
+        poi = m15["close"] >= h1["high"] * 0.997
+        poi_msg = f"1H Supply POI {h1['high']:.5f}"
+
+    if not poi:
+        return {"pair": pair, "setup": False, "bias": bias_1d, "reason": f"Not at POI yet - Price {m15['close']:.5f}"}
+
+    # Step 4: Liquidity Sweep Check - MANDATORY
     sweep_ok, sweep_msg = check_liquidity_sweep(h1, m15)
     if not sweep_ok:
         return {"pair": pair, "setup": False, "reason": sweep_msg, "bias": bias_1d}
 
-    # Step 4: Supply/Demand + POI (Point of Interest)
-    # Use 1H high/low as Supply/Demand, 15M close as entry check
-    if bias_1d == "BUY":
-        demand_zone = h1["low"]
-        supply_zone = h1["high"]
-        # Check if price near demand (POI)
-        poi = m15["close"] <= h1["low"] * 1.001 # Within 0.1% of demand
-    else:
-        demand_zone = h1["low"]
-        supply_zone = h1["high"]
-        poi = m15["close"] >= h1["high"] * 0.999
+    # Step 5: NEW - OB + FVG Check - FOR STRONG ENTRY
+    ob_ok, ob_msg = check_order_block(h1, m15, bias_1d)
+    fvg_ok, fvg_msg = check_fvg(h1, m15, bias_1d)
 
-    # Step 5: Fibonacci 50-79% Check
+    # Step 6: NEW - 15M Confirmation
+    confirm_ok, confirm_msg = check_15m_confirmation(m15, bias_1d)
+    if not confirm_ok:
+        return {"pair": pair, "setup": False, "bias": bias_1d, "reason": "No 15M confirmation candle"}
+
+    # Step 7: Fibonacci - ONLY FOR STRENGTH RATING (not mandatory)
     fib_ok, fib_msg = check_fibonacci_zone(h1["high"], h1["low"], m15["close"], bias_1d)
 
-    # Step 6: FINAL CONFLUENCE
-    if sweep_ok and poi and fib_ok:
+    # Step 8: FINAL STRONG CONFLUENCE
+    # Sweep + POI + (OB or FVG) + 15M = STRONG
+    # Fib adds SNIPER rating
+    if sweep_ok and poi and (ob_ok or fvg_ok) and confirm_ok:
+        if ob_ok and fvg_ok and fib_ok:
+            strength = "SNIPER 🔥🔥🔥"
+        elif (ob_ok or fvg_ok) and fib_ok:
+            strength = "STRONG ✅✅ + Fib"
+        else:
+            strength = "STRONG ✅"
+
         return {
             "pair": pair,
             "setup": True,
             "bias": bias_1d,
+            "strength": strength,
             "source": "TECHNICAL",
             "entry_price": m15["close"],
             "stop_loss": h1["low"] if bias_1d == "BUY" else h1["high"],
             "poi": f"Supply: {supply_zone} | Demand: {demand_zone}",
-            "confluence": f"✅ 1D {bias_1d} | 4H BOS aligned | {sweep_msg} | {fib_msg} | POI inside Demand/Supply",
+            "confluence": f"{strength} | 1D {bias_1d} | 4H BOS aligned | {poi_msg} | {sweep_msg} | {ob_msg if ob_ok else ''} {fvg_msg if fvg_ok else ''} | {fib_msg} | {confirm_msg}",
             "timeframes": {"1D": d1, "4H": h4, "1H": h1, "15M": m15}
         }
     else:
@@ -157,7 +211,7 @@ def analyze_top_down(pair):
             "pair": pair,
             "setup": False,
             "bias": bias_1d,
-            "reason": f"Sweep:{sweep_ok} POI:{poi} Fib:{fib_ok} - {fib_msg} - {sweep_msg}",
+            "reason": f"Weak: Sweep:{sweep_ok} POI:{poi} OB:{ob_ok} FVG:{fvg_ok} 15M:{confirm_ok} Fib:{fib_ok} - Need OB or FVG",
             "entry_price": m15["close"]
         }
 
