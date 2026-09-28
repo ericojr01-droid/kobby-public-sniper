@@ -1,7 +1,0 @@
-pyTelegramBotAPI
-Flask
-requests
-beautifulsoup4
-pytz
-yfinance
-lxml
