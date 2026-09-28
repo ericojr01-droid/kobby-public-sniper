@@ -1,135 +1,157 @@
-# BOT 2: FUNDAMENTAL NEWS TRADER + PROTECTOR + ALERTS - ALL PAIRS VERSION
-import datetime
+# bots/fundamental.py
+import requests
+from datetime import datetime, timedelta
+import pytz
 
-# YOUR PAIRS: GBPUSD GBPJPY XAUUSD AUDCAD EURUSD AUDUSD USDJPY BTCUSD NAS100 SPX
-PAIR_IMPACT = {
-    "GBPUSD": ["USD", "GBP"],
+# Your 10 pairs mapping to currencies
+PAIR_CURRENCY_MAP = {
+    "GBPUSD": ["GBP", "USD"],
     "GBPJPY": ["GBP", "JPY"],
-    "XAUUSD": ["USD", "XAU"],
+    "XAUUSD": ["USD"], # Gold moves with USD news
     "AUDCAD": ["AUD", "CAD"],
-    "EURUSD": ["USD", "EUR"],
-    "AUDUSD": ["USD", "AUD"],
+    "EURUSD": ["EUR", "USD"],
+    "AUDUSD": ["AUD", "USD"],
     "USDJPY": ["USD", "JPY"],
-    "BTCUSD": ["USD", "BTC", "CRYPTO"],
-    "NAS100": ["USD", "US"],
-    "NAS": ["USD", "US"],
-    "SPX500": ["USD", "US"],
-    "SPX": ["USD", "US"],
-    "US30": ["USD", "US"],
+    "BTCUSD": ["USD", "BTC"], # Special handling
+    "NAS100": ["USD"],
+    "SPX500": ["USD"]
 }
 
-def get_todays_news():
-    """HIGH impact news for ALL your markets - Later connect real ForexFactory API"""
-    now = datetime.datetime.utcnow()
-    todays = [
-        # USD affects 8 of your pairs
-        {"time": "12:30", "currency": "USD", "event": "CPI y/y", "impact": "HIGH", "pairs": ["GBPUSD","XAUUSD","EURUSD","AUDUSD","USDJPY","BTCUSD","NAS100","SPX500"]},
-        {"time": "13:15", "currency": "USD", "event": "NFP / Jobs", "impact": "HIGH", "pairs": ["GBPUSD","XAUUSD","EURUSD","AUDUSD","USDJPY","NAS100","SPX500"]},
-        {"time": "14:00", "currency": "USD", "event": "FOMC / Interest Rate", "impact": "HIGH", "pairs": ["GBPUSD","XAUUSD","EURUSD","USDJPY","BTCUSD","NAS100","SPX500"]},
-        {"time": "18:00", "currency": "USD", "event": "Fed Powell Speech", "impact": "HIGH", "pairs": ["GBPUSD","XAUUSD","EURUSD","AUDUSD","USDJPY","BTCUSD","NAS100","SPX500"]},
-        # GBP affects 2 pairs
-        {"time": "08:30", "currency": "GBP", "event": "GDP / CPI / Jobs", "impact": "HIGH", "pairs": ["GBPUSD","GBPJPY"]},
-        # EUR affects 1 pair
-        {"time": "07:15", "currency": "EUR", "event": "ECB Rate Decision", "impact": "HIGH", "pairs": ["EURUSD"]},
-        # AUD affects 2 pairs
-        {"time": "01:30", "currency": "AUD", "event": "AUD Jobs / CPI", "impact": "HIGH", "pairs": ["AUDUSD","AUDCAD"]},
-        # CAD affects 1 pair
-        {"time": "12:30", "currency": "CAD", "event": "CAD Oil / CPI", "impact": "HIGH", "pairs": ["AUDCAD"]},
-        # JPY affects 2 pairs
-        {"time": "23:50", "currency": "JPY", "event": "BOJ Interest Rate", "impact": "HIGH", "pairs": ["GBPJPY","USDJPY"]},
-        # BTC / Crypto
-        {"time": "15:00", "currency": "BTC", "event": "BTC Risk Sentiment", "impact": "HIGH", "pairs": ["BTCUSD"]},
-    ]
-    return todays
+cached_news = []
+last_fetch_time = None
 
-def check_upcoming_news(pair="XAUUSD", minutes_ahead=15):
-    """Check if high impact news coming for THAT pair in next X minutes"""
-    now = datetime.datetime.utcnow()
-    news_list = get_todays_news()
+def fetch_forex_factory_news():
+    """
+    Fetch real-time high impact news from Forex Factory
+    Using free Faireconomy API (official ForexFactory feed)
+    """
+    global cached_news, last_fetch_time
     
-    for news in news_list:
-        if pair in news.get("pairs", []) and news["impact"]=="HIGH":
-            h, m = map(int, news["time"].split(":"))
-            news_time = now.replace(hour=h, minute=m, second=0)
-            diff = (news_time - now).total_seconds() / 60
+    # Cache for 15 mins to avoid too many requests
+    if last_fetch_time and datetime.now() - last_fetch_time < timedelta(minutes=15):
+        return cached_news
+        
+    try:
+        # Real-time feed - same data as forexfactory.com
+        url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+        response = requests.get(url, timeout=10)
+        data = response.json()
+        
+        high_impact = []
+        for event in data:
+            if event.get("impact") == "High": # Only RED folder
+                high_impact.append({
+                    "currency": event.get("currency"),
+                    "title": event.get("title"),
+                    "time": event.get("date"), # ISO time
+                    "impact": "High"
+                })
+        
+        cached_news = high_impact
+        last_fetch_time = datetime.now()
+        return high_impact
+        
+    except Exception as e:
+        print(f"Fundamental fetch error: {e}")
+        return cached_news # Return last cache if error
 
-            if 0 <= diff <= minutes_ahead:
-                return True, f"⚠️ {news['currency']} {news['event']} in {int(diff)}min! Affects {pair} - Close trades!"
-            if -5 <= diff <= 5:
-                return True, f"🔴 NEWS LIVE NOW: {news['currency']} {news['event']} - DO NOT TRADE {pair}"
+def fetch_crypto_news():
+    """Check for high impact crypto news - for BTCUSD"""
+    try:
+        # Using CryptoPanic or simple check - you can add API key later
+        # For now we check if major BTC moving news exists via CoinGecko status
+        # We treat US High impact as BTC blocker too (Fed, CPI affects BTC)
+        return [] # Placeholder - USD news will block BTC already
+    except:
+        return []
 
-    return False, "Safe - No upcoming news"
+def is_news_block_active(pair):
+    """
+    Check if trading should be BLOCKED for a pair due to news
+    Returns: (blocked: bool, message: str, news_title: str)
+    """
+    forex_news = fetch_forex_factory_news()
+    currencies_to_check = PAIR_CURRENCY_MAP.get(pair, [])
+    
+    now_utc = datetime.now(pytz.utc)
+    
+    for news in forex_news:
+        if news["currency"] not in currencies_to_check:
+            continue
+            
+        try:
+            # Parse news time
+            news_time = datetime.fromisoformat(news["time"].replace("Z", "+00:00"))
+            
+            # Block 30 mins before and 30 mins after
+            block_start = news_time - timedelta(minutes=30)
+            block_end = news_time + timedelta(minutes=30)
+            
+            if block_start <= now_utc <= block_end:
+                minutes_to_news = int((news_time - now_utc).total_seconds() / 60)
+                
+                if minutes_to_news > 0:
+                    msg = f"🔴 {news['currency']} HIGH IMPACT NEWS IN {minutes_to_news}MINS - TRADING BLOCKED: {news['title']}"
+                else:
+                    msg = f"🔴 {news['currency']} NEWS LIVE - TRADING BLOCKED: {news['title']} - Wait {abs(minutes_to_news) + 30} mins"
+                
+                return True, msg, news["title"]
+                
+        except Exception as e:
+            continue
+    
+    return False, "", ""
 
-def check_open_trades_protection(open_trades):
-    """Alert if news go affect open trades - open_trades = [{'pair':'XAUUSD','type':'BUY'}]"""
-    alerts = []
-    for trade in open_trades:
-        pair = trade["pair"]
-        is_risky, msg = check_upcoming_news(pair, minutes_ahead=30)
-        if is_risky:
-            alerts.append(f"🚨 CLOSE ALERT: {pair} {trade['type']} | {msg}")
-    return alerts
-
-def analyze_fundamental_for_entry(pair, candles_15m, candles_5m):
-    """Trade news 5 mins AFTER release - momentum"""
-    is_risky, msg = check_upcoming_news(pair, minutes_ahead=15)
-    if is_risky:
-        return {"setup": False, "reason": f"News block: {msg}"}
-
-    if len(candles_5m) < 10:
-        return {"setup": False, "reason": "Not enough data after news"}
-
-    last_close = candles_5m[-1]['close']
-    prev_close = candles_5m[-6]['close']
-    momentum = (last_close - prev_close) / prev_close * 100
-
-    if abs(momentum) < 0.15:
-        return {"setup": False, "reason": f"Weak momentum {momentum:.2f}% after news"}
-
-    bias = "BULLISH" if momentum > 0 else "BEARISH"
-    return {
-        "setup": True,
-        "bias": bias,
-        "final": bias,
-        "reason": f"News momentum {momentum:.2f}% -> {bias}",
-        "momentum": momentum
-    }
-
-def get_daily_news_alert():
-    """7AM GMT daily news briefing for all your pairs"""
-    news = get_todays_news()
-    if not news:
-        return "📰 No HIGH impact news today - Safe to trade all day!"
-
-    msg = "📰 TODAY'S HIGH IMPACT NEWS (GMT):\n"
-    for n in news:
-        pairs_str = ",".join(n['pairs'])
-        msg += f"⏰ {n['time']} - {n['currency']} {n['event']} -> {pairs_str}\n"
-    msg += "\n⚠️ Bot will alert 15min before each!"
-    return msg
-
-def analyze_fundamental(pair="XAUUSD", candles_15m=None, candles_5m=None, open_trades=[]):
-    protection_alerts = check_open_trades_protection(open_trades)
-    is_blocked, block_msg = check_upcoming_news(pair, 15)
-
-    if is_blocked:
+def analyze_fundamental(pair):
+    """
+    MAIN FUNCTION for your bot - Use this in main.py
+    Technical = TradingView, Fundamental = ForexFactory + Crypto
+    """
+    blocked, alert_msg, news_title = is_news_block_active(pair)
+    
+    if blocked:
         return {
-            "setup": False,
-            "final": "NO TRADE - NEWS",
-            "alerts": protection_alerts,
-            "block_reason": block_msg,
-            "daily": get_daily_news_alert()
+            "pair": pair,
+            "allow_trading": False,
+            "source": "FUNDAMENTAL",
+            "alert_message": alert_msg,
+            "news": news_title,
+            "block_type": "NEWS_BLOCK"
+        }
+    else:
+        # Check for upcoming news (warning, not block yet)
+        forex_news = fetch_forex_factory_news()
+        currencies = PAIR_CURRENCY_MAP.get(pair, [])
+        now_utc = datetime.now(pytz.utc)
+        
+        for news in forex_news:
+            if news["currency"] in currencies:
+                try:
+                    news_time = datetime.fromisoformat(news["time"].replace("Z", "+00:00"))
+                    mins_until = int((news_time - now_utc).total_seconds() / 60)
+                    if 30 < mins_until <= 60: # Warning 60 to 30 mins before
+                        return {
+                            "pair": pair,
+                            "allow_trading": True,
+                            "source": "FUNDAMENTAL",
+                            "alert_message": f"⚠️ WARNING: {news['currency']} High Impact in {mins_until} mins - {news['title']} - Be careful",
+                            "news": news["title"],
+                            "block_type": "WARNING"
+                        }
+                except:
+                    pass
+        
+        return {
+            "pair": pair,
+            "allow_trading": True,
+            "source": "FUNDAMENTAL",
+            "alert_message": "",
+            "news": None,
+            "block_type": "CLEAR"
         }
 
-    if candles_15m and candles_5m:
-        entry_signal = analyze_fundamental_for_entry(pair, candles_15m, candles_5m)
-        entry_signal["alerts"] = protection_alerts
-        entry_signal["daily"] = get_daily_news_alert()
-        return entry_signal
-
-    return {
-        "setup": False,
-        "final": "NO SETUP",
-        "alerts": protection_alerts,
-        "daily": get_daily_news_alert()
-}
+# For testing
+if __name__ == "__main__":
+    for p in ["GBPUSD", "BTCUSD", "XAUUSD"]:
+        result = analyze_fundamental(p)
+        print(result)
