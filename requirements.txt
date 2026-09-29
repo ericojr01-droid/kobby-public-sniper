@@ -4,3 +4,5 @@ tradingview-ta
 python-telegram-bot
 pandas
 yfinance
+pytz
+gunicorn
