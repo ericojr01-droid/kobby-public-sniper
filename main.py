@@ -1,82 +1,54 @@
-import os
-import time
-import threading
-import requests
-from flask import Flask
+import time, os, requests
+from datetime import datetime
+from bots.top_down import analyze_top_down
+from bots.fundamental import analyze_fundamental
+from bots.entry_risk import generate_entry
+from bots.market_status import check_session_status, is_forex_market_open
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
-
-from bots.top_down import analyze_top_down
-from bots.fundamental import analyze_fundamental
-from bots.entry_risk import generate_entry
-from bots.market_status import get_market_status_alert, is_trading_allowed
-
-app = Flask(__name__)
-
+BALANCE = float(os.getenv("BALANCE", "1000"))
 PAIRS = ["GBPUSD","GBPJPY","XAUUSD","AUDCAD","EURUSD","AUDUSD","USDJPY","BTCUSD","NAS100","SPX500"]
-BALANCE = 1000
 
-def send_telegram(message):
+def send_telegram(msg):
     try:
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
         for cid in [CHAT_ID, CHANNEL_ID]:
             if cid:
-                data = {"chat_id": cid, "text": message, "parse_mode": "HTML"}
-                requests.post(url, data=data, timeout=10)
-    except Exception as e:
-        print(f"Telegram Error: {e}")
+                requests.post(url, data={"chat_id": cid, "text": msg, "parse_mode": "HTML"}, timeout=10)
+    except:
+        pass
 
-def bot_loop():
-    print("KobbyForex Loop Started")
-    last_market_alert = 0
+def run_scan():
+    print(f"\n=== SCAN START {datetime.utcnow().strftime('%H:%M:%S GMT')} ===", flush=True)
+    active, _ = check_session_status()
+    print(f"Active Sessions: {active} | Forex Open: {is_forex_market_open()}", flush=True)
+    for pair in PAIRS:
+        fund = analyze_fundamental(pair)
+        if fund["block_type"] == "BLOCK":
+            print(f"🔴 {pair} BLOCKED: {fund['alert_message']}", flush=True)
+            continue
+        print(f"Checking {pair}...", flush=True)
+        top = analyze_top_down(pair)
+        if not top["setup"]:
+            print(f"❌ {pair}: {top.get('reason','No setup')}", flush=True)
+            continue
+        entry_data = generate_entry(pair, top["bias"], top["entry_price"], top["stop_loss"], BALANCE, 1, top["source"])
+        if not entry_data:
+            print(f"❌ {pair}: Entry calc fail", flush=True)
+            continue
+        msg = f"{entry_data['alert_message']}\n\n<b>{top['strength']}</b>\n{top['confluence']}\nFundamental: {fund['block_type']} ✅"
+        send_telegram(msg)
+        print(f"✅ SIGNAL SENT {pair} {top['bias']}", flush=True)
+        time.sleep(1)
+    print("=== SCAN END ===\n", flush=True)
+
+if __name__ == "__main__":
+    send_telegram("🤖 KOBBYFOREX V2 LIVE - Pure SMC All 10 Pairs - 15min")
     while True:
         try:
-            if time.time() - last_market_alert > 14400:
-                market_data = get_market_status_alert()
-                send_telegram(market_data["full_message"])
-                last_market_alert = time.time()
-
-            for pair in PAIRS:
-                if not is_trading_allowed(pair):
-                    continue
-
-                fund = analyze_fundamental(pair)
-                if not fund["allow_trading"]:
-                    send_telegram(fund["alert_message"])
-                    continue
-                if fund["block_type"] == "WARNING":
-                    send_telegram(fund["alert_message"])
-
-                top = analyze_top_down(pair)
-                if top.get("setup"):
-                    entry_data = generate_entry(
-                        pair=pair,
-                        bias=top["bias"],
-                        current_price=top["entry_price"],
-                        source=top["source"],
-                        balance=BALANCE
-                    )
-                    if entry_data:
-                        msg = f"{top.get('strength','')}\n{entry_data['alert_message']}\n\n📍 {top['confluence']}\n📍 POI: {top['poi']}"
-                        send_telegram(msg)
-                time.sleep(10)
-            time.sleep(300)
+            run_scan()
         except Exception as e:
-            print(f"Loop error: {e}")
-            time.sleep(60)
-
-threading.Thread(target=bot_loop, daemon=True).start()
-
-@app.route('/')
-def home():
-    return "KobbyForex Bot Running - 10 Pairs LIVE"
-
-@app.route('/status')
-def status():
-    return {"status": "running", "pairs": PAIRS}
-
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+            print(f"Loop Error: {e}", flush=True)
+        time.sleep(900)
