@@ -11,7 +11,7 @@ CHANNEL_ID = os.environ.get("CHANNEL_ID")
 from bots.top_down import analyze_top_down as check_top_down
 from bots.entry_risk import generate_entry as check_entry_risk
 from bots.fundamental import analyze_fundamental as check_fundamentals
-from bots.market_status import is_market_open
+from bots.market_status import get_market_status_alert as check_market_trend
 
 app = Flask(__name__)
 
