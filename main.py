@@ -4,47 +4,77 @@ import threading
 import requests
 from flask import Flask
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-CHANNEL_ID = os.environ.get("CHANNEL_ID")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
+CHANNEL_ID = os.getenv("CHANNEL_ID")
 
-# Safe imports - no go crash if name different
-from bots.top_down import analyze_top_down as check_top_down
-from bots.entry_risk import generate_entry as check_entry_risk
-from bots.fundamental import analyze_fundamental as check_fundamentals
-from bots.market_status import get_market_status_alert as check_market_trend
+from bots.top_down import analyze_top_down
+from bots.fundamental import analyze_fundamental
+from bots.entry_risk import generate_entry
+from bots.market_status import get_market_status_alert, is_trading_allowed
 
 app = Flask(__name__)
+
+PAIRS = ["GBPUSD","GBPJPY","XAUUSD","AUDCAD","EURUSD","AUDUSD","USDJPY","BTCUSD","NAS100","SPX500"]
+BALANCE = 1000  # Change to your account balance
 
 def send_telegram(message):
     try:
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        data = {"chat_id": CHANNEL_ID, "text": message, "parse_mode": "HTML"}
-        requests.post(url, data=data, timeout=10)
+        for cid in [CHAT_ID, CHANNEL_ID]:
+            if cid:
+                data = {"chat_id": cid, "text": message, "parse_mode": "HTML"}
+                requests.post(url, data=data, timeout=10)
     except Exception as e:
         print(f"Telegram Error: {e}")
 
-def get_entry_signal():
-    # Try all possible function names inside entry_risk.py
-    for name in ["check_entry", "check_risk", "analyze_entry", "entry_check", "get_signal"]:
-        if hasattr(entry_risk, name):
-            return getattr(entry_risk, name)()
-    # If no function found, return file doc
-    return f"entry_risk loaded: {dir(entry_risk)}"
 
-def bot_loop():
-    print("Bot loop started...")
-    send_telegram("✅ KobbyForex Bot is LIVE on Render - Fixed version")
+                    
+                            def bot_loop():
+    print("KobbyForex Loop Started")
+    # send_telegram REMOVED - no more alive message
+    last_market_alert = 0
+
     while True:
         try:
-            if is_market_open():
-                top = analyze_top_down()
-                fund = check_fundamentals()
-                entry = get_entry_signal()
-                print(f"Checked: {top} | {fund} | {entry}")
-                time.sleep(3600)
-            else:
-                print("Market closed")
-                time.sleep(3600)
+            if time.time() - last_market_alert > 3600:
+                market_data = get_market_status_alert()
+                send_telegram(market_data["full_message"])
+                last_market_alert = time.time()
+
+            for pair in PAIRS:
+                if not is_trading_allowed(pair):
+                    continue
+
+                fund = analyze_fundamental(pair)
+                if not fund["allow_trading"]:
+                    send_telegram(fund["alert_message"])
+                    continue
+                if fund["block_type"] == "WARNING":
+                    send_telegram(fund["alert_message"])
+
+                top = analyze_top_down(pair)
+                if top.get("setup"):
+                    entry_data = generate_entry(
+                        pair=pair,
+                        bias=top["bias"],
+                        current_price=top["entry_price"],
+                        source=top["source"],
+                        balance=BALANCE
+                    )
+                    if entry_data:
+                        msg = (
+                            f"{top.get('strength','')}\n"
+                            f"{entry_data['alert_message']}\n\n"
+                            f"📍 {top['confluence']}\n"
+                            f"📍 POI: {top['poi']}"
+                        )
+                        send_telegram(msg)
+
+                time.sleep(10)
+
+            time.sleep(300)
+
         except Exception as e:
             print(f"Loop error: {e}")
             time.sleep(60)
@@ -53,7 +83,11 @@ threading.Thread(target=bot_loop, daemon=True).start()
 
 @app.route('/')
 def home():
-    return "KobbyForex Bot Running - LIVE"
+    return "KobbyForex Bot Running - 10 Pairs LIVE"
+
+@app.route('/status')
+def status():
+    return {"status":"running", "pairs":PAIRS}
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))
