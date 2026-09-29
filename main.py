@@ -4,8 +4,8 @@ import threading
 import requests
 from flask import Flask
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8826270602:AAEnJMLJOb6lW1QH4VaJ9E8edPacTprTE_Q")
-CHANNEL_ID = os.environ.get("CHANNEL_ID", "@KobbyforexTrade")
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+CHANNEL_ID = os.environ.get("CHANNEL_ID")
 
 # Safe imports - no go crash if name different
 from bots.top_down import analyze_top_down
