@@ -1,8 +1,9 @@
 import requests
 
-BOT_TOKEN = "8826207602:AAEnJMlJOb6lW1QHV4aJ9E8edPacTprTE_Q"
-CHAT_ID = "8240862120"
-CHANNEL_ID = "@KobbyforexTrade"
+import os
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
+CHANNEL_ID = os.getenv("CHANNEL_ID")
 
 def send_telegram(message):
     try:
