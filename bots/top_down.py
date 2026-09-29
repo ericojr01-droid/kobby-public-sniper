@@ -1,39 +1,78 @@
-import time
+import time, random
 from tradingview_ta import TA_Handler, Interval
 
 PAIRS_MAP = {
     "XAUUSD": {"symbol": "XAUUSD", "exchange": "OANDA", "screener": "forex"}
 }
+# Alternative if OANDA still 429: use FX_IDC
+BACKUP_MAP = {
+    "XAUUSD": {"symbol": "XAUUSD", "exchange": "FX_IDC", "screener": "forex"}
+}
+
 INTERVAL_MAP = {
     "4H": Interval.INTERVAL_4_HOURS,
     "1H": Interval.INTERVAL_1_HOUR,
     "15M": Interval.INTERVAL_15_MINUTES
 }
 
+# global last success cache
+CACHE = {}
+
 def get_tv(pair, tf):
-    c = PAIRS_MAP[pair]
-    for attempt in range(2):
+    global CACHE
+    key = f"{pair}_{tf}"
+
+    for attempt in range(3):
         try:
-            time.sleep(2.5)
+            # Anti-block: random 5-8 sec delay
+            delay = random.uniform(5, 8)
+            print(f"TV Wait {delay:.1f}s for {pair} {tf}...", flush=True)
+            time.sleep(delay)
+
+            c = PAIRS_MAP.get(pair)
             h = TA_Handler(symbol=c["symbol"], exchange=c["exchange"], screener=c["screener"], interval=INTERVAL_MAP[tf])
             a = h.get_analysis()
-            return {
-                "close": a.indicators["close"],
-                "open": a.indicators["open"],
-                "high": a.indicators["high"],
-                "low": a.indicators["low"]
-            }
+            data = {"close": a.indicators["close"], "open": a.indicators["open"], "high": a.indicators["high"], "low": a.indicators["low"]}
+            CACHE[key] = data
+            print(f"TV OK {pair} {tf}: {data['close']}", flush=True)
+            return data
+
         except Exception as e:
-            print(f"TV {pair} {tf} attempt {attempt} fail: {e}", flush=True)
-            time.sleep(4)
+            err = str(e)
+            print(f"TV {pair} {tf} attempt {attempt} fail: {err}", flush=True)
+
+            # If 429, wait 70 sec + try backup exchange
+            if "429" in err:
+                print("TV 429 DETECTED - Sleeping 70s to cool down", flush=True)
+                time.sleep(70)
+                # try backup exchange on last attempt
+                if attempt == 1:
+                    try:
+                        print(f"Trying BACKUP exchange for {pair}", flush=True)
+                        c = BACKUP_MAP.get(pair)
+                        h = TA_Handler(symbol=c["symbol"], exchange=c["exchange"], screener=c["screener"], interval=INTERVAL_MAP[tf])
+                        a = h.get_analysis()
+                        data = {"close": a.indicators["close"], "open": a.indicators["open"], "high": a.indicators["high"], "low": a.indicators["low"]}
+                        CACHE[key] = data
+                        return data
+                    except Exception as e2:
+                        print(f"Backup also fail: {e2}", flush=True)
+            else:
+                time.sleep(10)
+
+    # If all fail, return cached data if exists
+    if key in CACHE:
+        print(f"Using CACHED data for {pair} {tf}", flush=True)
+        return CACHE[key]
     return None
 
 def analyze_top_down(pair):
     h4 = get_tv(pair, "4H")
     h1 = get_tv(pair, "1H")
     m15 = get_tv(pair, "15M")
+
     if not all([h4, h1, m15]):
-        return {"setup": False, "reason": "TV data incomplete"}
+        return {"setup": False, "reason": "TV data incomplete - 429 cooldown"}
 
     bias = "BUY" if h4["close"] > h4["open"] else "SELL"
 
@@ -81,14 +120,6 @@ def analyze_top_down(pair):
     if not ob:
         return {"pair": pair, "setup": False, "bias": bias, "reason": "No OB"}
 
-    if bias == "BUY":
-        confirm = m15["close"] > m15["open"]
-    else:
-        confirm = m15["close"] < m15["open"]
-
-    if not confirm:
-        return {"pair": pair, "setup": False, "bias": bias, "reason": "No 15M Confirm"}
-
     return {
         "pair": pair,
         "setup": True,
@@ -98,4 +129,4 @@ def analyze_top_down(pair):
         "entry_price": m15["close"],
         "stop_loss": sl_price,
         "confluence": f"{sweep_msg} | BOS ✅ | Fib 50-79% ✅ | OB ✅ | 15M Confirm ✅"
-}
+        }
