@@ -16,7 +16,7 @@ from bots.market_status import get_market_status_alert, is_trading_allowed
 app = Flask(__name__)
 
 PAIRS = ["GBPUSD","GBPJPY","XAUUSD","AUDCAD","EURUSD","AUDUSD","USDJPY","BTCUSD","NAS100","SPX500"]
-BALANCE = 1000  # Change to your account balance
+BALANCE = 1000
 
 def send_telegram(message):
     try:
@@ -28,13 +28,9 @@ def send_telegram(message):
     except Exception as e:
         print(f"Telegram Error: {e}")
 
-
-                    
-                            def bot_loop():
+def bot_loop():
     print("KobbyForex Loop Started")
-    # send_telegram REMOVED - no more alive message
     last_market_alert = 0
-
     while True:
         try:
             if time.time() - last_market_alert > 3600:
@@ -63,18 +59,10 @@ def send_telegram(message):
                         balance=BALANCE
                     )
                     if entry_data:
-                        msg = (
-                            f"{top.get('strength','')}\n"
-                            f"{entry_data['alert_message']}\n\n"
-                            f"📍 {top['confluence']}\n"
-                            f"📍 POI: {top['poi']}"
-                        )
+                        msg = f"{top.get('strength','')}\n{entry_data['alert_message']}\n\n📍 {top['confluence']}\n📍 POI: {top['poi']}"
                         send_telegram(msg)
-
                 time.sleep(10)
-
             time.sleep(300)
-
         except Exception as e:
             print(f"Loop error: {e}")
             time.sleep(60)
@@ -87,7 +75,7 @@ def home():
 
 @app.route('/status')
 def status():
-    return {"status":"running", "pairs":PAIRS}
+    return {"status": "running", "pairs": PAIRS}
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))
