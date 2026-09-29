@@ -1,8 +1,6 @@
 Flask
 requests
-tradingview-ta
-python-telegram-bot
-pandas
-yfinance
+tradingview_ta
 pytz
+python-telegram-bot
 gunicorn
