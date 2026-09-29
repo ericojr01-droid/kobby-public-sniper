@@ -2,19 +2,7 @@ import requests
 import pytz
 from datetime import datetime, timedelta
 
-PAIR_CURRENCY_MAP = {
-    "GBPUSD": ["GBP", "USD"],
-    "GBPJPY": ["GBP", "JPY"],
-    "XAUUSD": ["USD"],
-    "AUDCAD": ["AUD", "CAD"],
-    "EURUSD": ["EUR", "USD"],
-    "AUDUSD": ["AUD", "USD"],
-    "USDJPY": ["USD", "JPY"],
-    "BTCUSD": ["USD"],
-    "NAS100": ["USD"],
-    "SPX500": ["USD"]
-}
-
+PAIR_CURRENCY_MAP = {"XAUUSD": ["USD"]}
 cached = []
 last = None
 
@@ -42,14 +30,12 @@ def is_news_block_active(pair):
     for n in news:
         if n["currency"] not in currs:
             continue
-        title = n["title"].lower()
-        if not any(x in title for x in ["cpi", "fomc", "interest", "nfp", "nonfarm", "gdp", "ppi"]):
+        if not any(x in n["title"].lower() for x in ["cpi", "fomc", "interest", "nfp", "nonfarm", "gdp", "ppi"]):
             continue
         try:
             nt = datetime.fromisoformat(n["time"].replace("Z", "+00:00"))
             if nt - timedelta(minutes=60) <= now <= nt + timedelta(minutes=60):
-                mins = int((nt - now).total_seconds() / 60)
-                return True, f"🔴 {n['currency']} {n['title']} in {mins}min BLOCK 60m", n["title"]
+                return True, f"🔴 {n['currency']} {n['title']} BLOCK", n["title"]
         except:
             continue
     return False, "", ""
