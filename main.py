@@ -40,10 +40,11 @@ def bot_loop():
                 top = analyze_top_down()
                 fund = check_fundamentals()
                 entry = get_entry_signal()
-                print(f"Checked: {top} | {fund} | {entry}")
-            else:
-                print("Market closed")
-            time.sleep(300)
+                        print(f"Checked: {top} | {fund} | {entry}")
+            time.sleep(3600)  # wait 1 hour before next check
+        else:
+            print("Market closed")
+            time.sleep(3600)  # also 1 hour when closed
         except Exception as e:
             print(f"Loop error: {e}")
             time.sleep(60)
