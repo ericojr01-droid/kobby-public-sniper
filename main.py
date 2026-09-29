@@ -33,7 +33,7 @@ def bot_loop():
     last_market_alert = 0
     while True:
         try:
-            if time.time() - last_market_alert > 3600:
+            if time.time() - last_market_alert > 14400:
                 market_data = get_market_status_alert()
                 send_telegram(market_data["full_message"])
                 last_market_alert = time.time()
